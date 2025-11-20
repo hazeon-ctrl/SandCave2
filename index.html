@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SandCave</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+        }
+        #gameCanvas {
+            border: 3px solid #4a4a6a;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+            background: #0f0f1e;
+        }
+        .hud {
+            margin-bottom: 15px;
+            font-size: 18px;
+            text-align: center;
+        }
+        .controls {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .game-over, .game-won {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 10;
+        }
+        .game-over h2 {
+            color: #ff4444;
+            margin-bottom: 20px;
+        }
+        .game-won h2 {
+            color: #44ff44;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 30px;
+            font-size: 16px;
+            background: #4a4a6a;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover {
+            background: #5a5a7a;
+        }
+    </style>
+</head>
+<body>
+<div class="hud">
+    <span>Layer: <span id="layer">1</span>/12</span>
+</div>
+<canvas id="gameCanvas" width="900" height="720"></canvas>
+<div class="controls">
+    ← → to move | SPACE to dig | R to restart
+</div>
+
+<div class="game-over" id="gameOver">
+    <h2>Game Over!</h2>
+    <p>You were caught by an enemy!</p>
+    <button onclick="restartGame()">Try Again</button>
+</div>
+
+<div class="game-won" id="gameWon">
+    <h2>Victory!</h2>
+    <p>You escaped the SandCave!</p>
+    <button onclick="restartGame()">Play Again</button>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const CUBE_SIZE = 50;
+    const COLS = 18;
+    const ROWS = 12;
+    const PLAYER_SIZE = 20;
+
+    let gameState = 'playing';
+    let particles = [];
+
+    class Player {
+        constructor() {
+            this.x = canvas.width / 2;
+            this.y = 30;
+            this.layer = 0;
+            this.speed = 4;
+            this.falling = false;
+            this.fallSpeed = 0;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(Math.PI / 4);
+
+            // Glow effect
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#00d4ff';
+            ctx.fillStyle = '#00d4ff';
+            ctx.fillRect(-PLAYER_SIZE/2, -PLAYER_SIZE/2, PLAYER_SIZE, PLAYER_SIZE);
+
+            ctx.restore();
+        }
+
+        update() {
+            if (this.falling) {
+                this.fallSpeed += 0.5;
+                this.y += this.fallSpeed;
+
+                const targetY = this.layer * 60 + 30;
+                if (this.y >= targetY) {
+                    this.y = targetY;
+                    this.falling = false;
+                    this.fallSpeed = 0;
+                }
+            }
+        }
+
+        moveLeft() {
+            if (!this.falling && this.x > PLAYER_SIZE) {
+                const newX = this.x - this.speed;
+                const col = Math.floor(newX / CUBE_SIZE);
+
+                // Check if there's a rock blocking
+                if (!cave.isRockAt(col, this.layer)) {
+                    this.x = newX;
+                }
+            }
+        }
+
+        moveRight() {
+            if (!this.falling && this.x < canvas.width - PLAYER_SIZE) {
+                const newX = this.x + this.speed;
+                const col = Math.floor(newX / CUBE_SIZE);
+
+                // Check if there's a rock blocking
+                if (!cave.isRockAt(col, this.layer)) {
+                    this.x = newX;
+                }
+            }
+        }
+
+        dig() {
+            if (this.falling || this.layer >= ROWS - 1) return;
+
+            const col = Math.floor(this.x / CUBE_SIZE);
+
+            // Can't dig through rocks
+            if (cave.isRockAt(col, this.layer)) {
+                return;
+            }
+
+            if (cave.layers[this.layer][col]) {
+                cave.layers[this.layer][col] = false;
+                createDustParticles(col * CUBE_SIZE + CUBE_SIZE/2, this.layer * 60 + 40);
+                this.layer++;
+                this.falling = true;
+                updateHUD();
+            }
+        }
+    }
+
+    class Cave {
+        constructor() {
+            this.layers = [];
+            this.rocks = [];
+            this.doorCol = Math.floor(Math.random() * COLS);
+
+            for (let i = 0; i < ROWS; i++) {
+                this.layers[i] = new Array(COLS).fill(true);
+                this.rocks[i] = [];
+
+                // Add random rocks (15% chance per tile, but not on top layer or door position)
+                for (let j = 0; j < COLS; j++) {
+                    if (i === 0) {
+                        this.rocks[i][j] = false;
+                    } else if (i === ROWS - 1 && j === this.doorCol) {
+                        this.rocks[i][j] = false; // No rock where door is
+                    } else {
+                        this.rocks[i][j] = Math.random() < 0.15;
+                    }
+                }
+            }
+        }
+
+        draw() {
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    if (this.layers[row][col]) {
+                        const x = col * CUBE_SIZE;
+                        const y = row * 60;
+
+                        if (this.rocks[row][col]) {
+                            // Rock tile - gray and solid
+                            ctx.fillStyle = '#555555';
+                            ctx.fillRect(x, y, CUBE_SIZE, 60);
+                            ctx.fillStyle = '#444444';
+                            ctx.fillRect(x + 5, y + 5, CUBE_SIZE - 10, 50);
+                            ctx.strokeStyle = '#333333';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(x, y, CUBE_SIZE, 60);
+                        } else {
+                            // Dark brown crust
+                            ctx.fillStyle = '#4a3520';
+                            ctx.fillRect(x, y, CUBE_SIZE, 20);
+
+                            // Light brown underneath
+                            ctx.fillStyle = '#8b6f47';
+                            ctx.fillRect(x, y + 20, CUBE_SIZE, 40);
+
+                            // Border
+                            ctx.strokeStyle = '#2a1f15';
+                            ctx.strokeRect(x, y, CUBE_SIZE, 60);
+                        }
+                    }
+                }
+            }
+
+            // Draw door at bottom (random position)
+            const doorX = this.doorCol * CUBE_SIZE + 10;
+            const doorY = (ROWS - 1) * 60 + 10;
+
+            if (player.layer === ROWS - 1 &&
+                Math.abs(player.x - (doorX + 15)) < 35) {
+                // Win glow
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = '#7fff7f';
+                ctx.fillStyle = '#7fff7f';
+                gameState = 'won';
+                setTimeout(() => {
+                    document.getElementById('gameWon').style.display = 'block';
+                }, 500);
+            } else {
+                ctx.fillStyle = '#cc5500';
+            }
+
+            ctx.fillRect(doorX, doorY, 30, 40);
+            ctx.strokeStyle = '#994400';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(doorX, doorY, 30, 40);
+        }
+
+        isRockAt(col, row) {
+            return this.rocks[row] && this.rocks[row][col];
+        }
+    }
+
+    class Enemy {
+        constructor(layer, type) {
+            this.layer = layer;
+            this.type = type; // 'fast' or 'slow'
+            this.x = Math.random() * (canvas.width - 40) + 20;
+            this.speed = type === 'fast' ? 2.5 : 1;
+            this.direction = Math.random() > 0.5 ? 1 : -1;
+            this.size = 15;
+        }
+
+        draw() {
+            const y = this.layer * 60 + 30;
+
+            if (this.type === 'fast') {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#00ffcc';
+                ctx.fillStyle = '#00ffcc';
+            } else {
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#cc6644';
+                ctx.fillStyle = '#cc6644';
+            }
+
+            ctx.beginPath();
+            ctx.arc(this.x, y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        update() {
+            this.x += this.speed * this.direction;
+
+            if (this.x < this.size || this.x > canvas.width - this.size) {
+                this.direction *= -1;
+            }
+        }
+
+        checkCollision(player) {
+            if (player.layer !== this.layer) return false;
+
+            const dist = Math.hypot(player.x - this.x, player.y - (this.layer * 60 + 30));
+            return dist < this.size + PLAYER_SIZE/2;
+        }
+    }
+
+    class Particle {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.vx = (Math.random() - 0.5) * 4;
+            this.vy = -Math.random() * 3 - 2;
+            this.life = 1;
+            this.size = Math.random() * 3 + 2;
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.vy += 0.2;
+            this.life -= 0.02;
+        }
+
+        draw() {
+            ctx.globalAlpha = this.life;
+            ctx.fillStyle = '#8b6f47';
+            ctx.fillRect(this.x, this.y, this.size, this.size);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function createDustParticles(x, y) {
+        for (let i = 0; i < 20; i++) {
+            particles.push(new Particle(x, y));
+        }
+    }
+
+    const player = new Player();
+    const cave = new Cave();
+    const enemies = [];
+
+    // Create enemies for each layer
+    for (let i = 1; i < ROWS; i++) {
+        const numEnemies = Math.floor(Math.random() * 2) + 1;
+        for (let j = 0; j < numEnemies; j++) {
+            const type = Math.random() > 0.5 ? 'fast' : 'slow';
+            enemies.push(new Enemy(i, type));
+        }
+    }
+
+    const keys = {};
+    window.addEventListener('keydown', (e) => {
+        keys[e.key] = true;
+        if (e.key === ' ') {
+            e.preventDefault();
+            if (gameState === 'playing') player.dig();
+        }
+        if (e.key.toLowerCase() === 'r') {
+            restartGame();
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.key] = false;
+    });
+
+    function updateHUD() {
+        document.getElementById('layer').textContent = player.layer + 1;
+    }
+
+    function restartGame() {
+        document.getElementById('gameOver').style.display = 'none';
+        document.getElementById('gameWon').style.display = 'none';
+
+        gameState = 'playing';
+        player.x = canvas.width / 2;
+        player.y = 30;
+        player.layer = 0;
+        player.falling = false;
+        player.fallSpeed = 0;
+
+        cave.layers = [];
+        for (let i = 0; i < ROWS; i++) {
+            cave.layers[i] = new Array(COLS).fill(true);
+        }
+
+        cave.rocks = [];
+        cave.doorCol = Math.floor(Math.random() * COLS);
+        for (let i = 0; i < ROWS; i++) {
+            cave.rocks[i] = [];
+            for (let j = 0; j < COLS; j++) {
+                if (i === 0) {
+                    cave.rocks[i][j] = false;
+                } else if (i === ROWS - 1 && j === cave.doorCol) {
+                    cave.rocks[i][j] = false;
+                } else {
+                    cave.rocks[i][j] = Math.random() < 0.15;
+                }
+            }
+        }
+
+        enemies.length = 0;
+        for (let i = 1; i < ROWS; i++) {
+            const numEnemies = Math.floor(Math.random() * 2) + 1;
+            for (let j = 0; j < numEnemies; j++) {
+                const type = Math.random() > 0.5 ? 'fast' : 'slow';
+                enemies.push(new Enemy(i, type));
+            }
+        }
+
+        particles.length = 0;
+        updateHUD();
+    }
+
+    function gameLoop() {
+        ctx.fillStyle = '#0f0f1e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        cave.draw();
+
+        if (gameState === 'playing') {
+            // Player movement
+            if (keys['ArrowLeft']) player.moveLeft();
+            if (keys['ArrowRight']) player.moveRight();
+
+            player.update();
+
+            // Update enemies
+            enemies.forEach(enemy => {
+                enemy.update();
+                enemy.draw();
+
+                if (enemy.checkCollision(player)) {
+                    if (enemy.type === 'fast') {
+                        gameState = 'over';
+                        document.getElementById('gameOver').style.display = 'block';
+                    } else if (enemy.type === 'slow' && player.layer > 0) {
+                        player.layer--;
+                        player.y = player.layer * 60 + 30;
+                        updateHUD();
+                    }
+                }
+            });
+        }
+
+        player.draw();
+
+        // Update particles
+        particles = particles.filter(p => {
+            p.update();
+            p.draw();
+            return p.life > 0;
+        });
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+</script>
+</body>
+</html>
