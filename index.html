@@ -74,6 +74,7 @@
 <body>
 <div class="hud">
     <span>Layer: <span id="layer">1</span>/12</span>
+    <span style="margin-left: 30px;">Key: <span id="keyStatus">❌</span></span>
 </div>
 <canvas id="gameCanvas" width="900" height="720"></canvas>
 <div class="controls">
@@ -103,6 +104,8 @@
 
     let gameState = 'playing';
     let particles = [];
+    let keyCollected = false;
+    let key = null;
 
     class Player {
         constructor() {
@@ -138,6 +141,16 @@
                     this.y = targetY;
                     this.falling = false;
                     this.fallSpeed = 0;
+                }
+            }
+
+            // Check key collection
+            if (key && !keyCollected && this.layer === key.layer) {
+                const dist = Math.abs(this.x - key.x);
+                if (dist < 30) {
+                    keyCollected = true;
+                    document.getElementById('keyStatus').textContent = '✅';
+                    key = null;
                 }
             }
         }
@@ -246,16 +259,24 @@
             const doorX = this.doorCol * CUBE_SIZE + 10;
             const doorY = (ROWS - 1) * 60 + 10;
 
+            // Check if player reached door with key
             if (player.layer === ROWS - 1 &&
                 Math.abs(player.x - (doorX + 15)) < 35) {
-                // Win glow
-                ctx.shadowBlur = 30;
-                ctx.shadowColor = '#7fff7f';
-                ctx.fillStyle = '#7fff7f';
-                gameState = 'won';
-                setTimeout(() => {
-                    document.getElementById('gameWon').style.display = 'block';
-                }, 500);
+                if (keyCollected) {
+                    // Win glow
+                    ctx.shadowBlur = 30;
+                    ctx.shadowColor = '#7fff7f';
+                    ctx.fillStyle = '#7fff7f';
+                    gameState = 'won';
+                    setTimeout(() => {
+                        document.getElementById('gameWon').style.display = 'block';
+                    }, 500);
+                } else {
+                    // Door locked - red glow
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = '#ff4444';
+                    ctx.fillStyle = '#cc5500';
+                }
             } else {
                 ctx.fillStyle = '#cc5500';
             }
@@ -264,6 +285,14 @@
             ctx.strokeStyle = '#994400';
             ctx.lineWidth = 2;
             ctx.strokeRect(doorX, doorY, 30, 40);
+            ctx.shadowBlur = 0;
+
+            // Draw lock icon if key not collected
+            if (!keyCollected) {
+                ctx.fillStyle = '#ffdd00';
+                ctx.font = '20px Arial';
+                ctx.fillText('🔒', doorX + 5, doorY + 28);
+            }
         }
 
         isRockAt(col, row) {
@@ -353,9 +382,33 @@
         }
     }
 
+    class Key {
+        constructor() {
+            // Random layer (not first or last)
+            this.layer = Math.floor(Math.random() * (ROWS - 3)) + 2;
+            this.x = Math.random() * (canvas.width - 60) + 30;
+            this.bobOffset = 0;
+        }
+
+        draw() {
+            this.bobOffset += 0.05;
+            const y = this.layer * 60 + 30 + Math.sin(this.bobOffset) * 5;
+
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#ffdd00';
+            ctx.fillStyle = '#ffdd00';
+            ctx.font = '30px Arial';
+            ctx.fillText('🔑', this.x - 15, y + 10);
+            ctx.shadowBlur = 0;
+        }
+    }
+
     const player = new Player();
     const cave = new Cave();
     const enemies = [];
+
+    // Create key
+    key = new Key();
 
     // Create enemies for each layer
     for (let i = 1; i < ROWS; i++) {
@@ -391,6 +444,9 @@
         document.getElementById('gameWon').style.display = 'none';
 
         gameState = 'playing';
+        keyCollected = false;
+        document.getElementById('keyStatus').textContent = '❌';
+
         player.x = canvas.width / 2;
         player.y = 30;
         player.layer = 0;
@@ -427,6 +483,10 @@
         }
 
         particles.length = 0;
+
+        // Create new key
+        key = new Key();
+
         updateHUD();
     }
 
@@ -435,6 +495,11 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         cave.draw();
+
+        // Draw key if not collected
+        if (key && !keyCollected) {
+            key.draw();
+        }
 
         if (gameState === 'playing') {
             // Player movement
